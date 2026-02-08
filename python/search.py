@@ -18,6 +18,9 @@ then create problem instances and solve them with calls to the various search
 functions."""
 
 import sys
+import os
+import heapq
+from subway import build_boston_map, build_london_map, straight_line_distance
 
 #______________________________________________________________________________
 
@@ -62,6 +65,70 @@ class Problem:
 		"""Return the heuristic function value for a particular node. Implement
 		this if using informed (heuristic) search."""
 		return 0
+
+class SubwayProblem(Problem):
+	def __init__(self, subway_map,start_station, goal_station, distance_threshold=0.0):
+		super().__init__(start_station,goal_station)
+		self.subway_map = subway_map
+		self.distance_threshold = distance_threshold
+	
+	def successor(self, state):
+		successors = []
+		for link in self.subway_map.incident_links(state):
+			next_station = link.opposite(state)
+			successors.append((link,next_station))
+		return successors
+	
+	def path_cost(self, c, state1, action, state2):
+		return c + action.get_distance()
+
+	def h(self, node):
+		return straight_line_distance(node.state, self.goal)
+
+	def goal_test(self, state):
+		return straight_line_distance(state, self.goal) <= self.distance_threshold
+
+
+class EightPuzzleProblem(Problem):
+	def __init__(self, initial_state, goal_state='012345678'):
+		super().__init__(initial_state, goal_state)
+
+	def successor(self, state):
+		zero_index = state.index('0')
+		row = zero_index // 3
+		col = zero_index % 3
+		successors = []
+
+		def swap_positions(i, j):
+			cells = list(state)
+			cells[i], cells[j] = cells[j], cells[i]
+			return ''.join(cells)
+
+		# Required action order: up, left, down, right
+		if row > 0:
+			next_state = swap_positions(zero_index, zero_index - 3)
+			successors.append(('up', next_state))
+		if col > 0:
+			next_state = swap_positions(zero_index, zero_index - 1)
+			successors.append(('left', next_state))
+		if row < 2:
+			next_state = swap_positions(zero_index, zero_index + 3)
+			successors.append(('down', next_state))
+		if col < 2:
+			next_state = swap_positions(zero_index, zero_index + 1)
+			successors.append(('right', next_state))
+
+		return successors
+
+	def h(self, node):
+		distance = 0
+		for tile in '12345678':
+			current_index = node.state.index(tile)
+			goal_index = self.goal.index(tile)
+			current_row, current_col = divmod(current_index, 3)
+			goal_row, goal_col = divmod(goal_index, 3)
+			distance += abs(current_row - goal_row) + abs(current_col - goal_col)
+		return distance
 #______________________________________________________________________________
 	
 '''DO NOT MODIFY THIS CLASS'''
@@ -129,30 +196,217 @@ class Node:
 '''DO NOT MODIFY THE HEADERS OF ANY OF THESE FUNCTIONS'''
 
 def breadth_first_search(problem):
-	'''YOUR CODE HERE'''
-	pass
+	root = Node(problem.initial)
+	if problem.goal_test(root.state):
+		problem.visited_count = 0
+		return root
+
+	frontier = [root]
+	frontier_states = {root.state}
+	visited_states = set()
+	problem.visited_count = 0
+
+	while frontier:
+		current = frontier.pop(0)
+		frontier_states.discard(current.state)
+		visited_states.add(current.state)
+		problem.visited_count += 1
+
+		for child in current.expand(problem):
+			if child.state in visited_states or child.state in frontier_states:
+				continue
+			if problem.goal_test(child.state):
+				return child
+			frontier.append(child)
+			frontier_states.add(child.state)
+
+	return None
 	
 def depth_first_search(problem):
-	'''YOUR CODE HERE'''
-	pass
+	frontier = [Node(problem.initial)]
+	frontier_states = {problem.initial}
+	visited_states = set()
+	problem.visited_count = 0
+
+	while frontier:
+		current = frontier.pop()
+		frontier_states.discard(current.state)
+
+		if current.state in visited_states:
+			continue
+
+		visited_states.add(current.state)
+		problem.visited_count += 1
+
+		if problem.goal_test(current.state):
+			return current
+
+		children = current.expand(problem)
+		for child in reversed(children):
+			if child.state not in visited_states and child.state not in frontier_states:
+				frontier.append(child)
+				frontier_states.add(child.state)
+
+	return None
 
 def uniform_cost_search(problem):
-	'''YOUR CODE HERE'''
-	pass
+	root = Node(problem.initial)
+	frontier = []
+	heapq.heappush(frontier, (root.path_cost, root.id, root))
+	best_frontier_cost = {root.state: 0}
+	visited_states = set()
+	problem.visited_count = 0
+
+	while frontier:
+		_, _, current = heapq.heappop(frontier)
+
+		if current.state in visited_states:
+			continue
+		if current.path_cost > best_frontier_cost.get(current.state, float('inf')):
+			continue
+
+		visited_states.add(current.state)
+		problem.visited_count += 1
+
+		if problem.goal_test(current.state):
+			return current
+
+		for child in current.expand(problem):
+			if child.state in visited_states:
+				continue
+			if child.path_cost < best_frontier_cost.get(child.state, float('inf')):
+				best_frontier_cost[child.state] = child.path_cost
+				heapq.heappush(frontier, (child.path_cost, child.id, child))
+
+	return None
 #______________________________________________________________________________
 # Informed (Heuristic) Search
 
 def astar_search(problem):
-	'''YOUR CODE HERE'''
-	pass
+	root = Node(problem.initial)
+	frontier = []
+	root_f = root.path_cost + problem.h(root)
+	heapq.heappush(frontier, (root_f, root.id, root))
+	best_frontier_g = {root.state: 0}
+	visited_states = set()
+	problem.visited_count = 0
+
+	while frontier:
+		_, _, current = heapq.heappop(frontier)
+
+		if current.state in visited_states:
+			continue
+		if current.path_cost > best_frontier_g.get(current.state, float('inf')):
+			continue
+
+		visited_states.add(current.state)
+		problem.visited_count += 1
+
+		if problem.goal_test(current.state):
+			return current
+
+		for child in current.expand(problem):
+			if child.state in visited_states:
+				continue
+			if child.path_cost < best_frontier_g.get(child.state, float('inf')):
+				best_frontier_g[child.state] = child.path_cost
+				child_f = child.path_cost + problem.h(child)
+				heapq.heappush(frontier, (child_f, child.id, child))
+
+	return None
 
 #______________________________________________________________________________
 ## Main
 
 def main():
-	'''REPLACE THIS CODE WITH CODE THAT RUNS THE PROGRAM SPECIFIED IN THE COMMAND ARGUMENTS'''
+	os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-	print(sys.argv) # Prints the command line arguments. Note that the 0th element is the name of the file (search.py).
-	
+	if len(sys.argv) < 4:
+		print('Usage: python search.py <city|eight> <algorithm> <args...>')
+		return
 
-main()
+	city = sys.argv[1].lower()
+	algorithm = sys.argv[2].lower()
+	if city == 'eight':
+		if len(sys.argv) not in (4, 5):
+			print('Usage: python search.py eight <algorithm> <initial_state> [goal_state]')
+			return
+		initial_state = sys.argv[3]
+		goal_state = '012345678' if len(sys.argv) == 4 else sys.argv[4]
+		valid_tiles = set('012345678')
+
+		if len(initial_state) != 9 or set(initial_state) != valid_tiles:
+			print('Initial state must be a permutation of 012345678.')
+			return
+		if len(goal_state) != 9 or set(goal_state) != valid_tiles:
+			print('Goal state must be a permutation of 012345678.')
+			return
+
+		problem = EightPuzzleProblem(initial_state, goal_state)
+	elif city in ('boston', 'london'):
+		if len(sys.argv) not in (5, 6):
+			print('Usage: python search.py <boston|london> <algorithm> <start_station> <goal_station> [distance_km]')
+			return
+		start_name = sys.argv[3]
+		goal_name = sys.argv[4]
+		distance_threshold = 0.0
+
+		if len(sys.argv) == 6:
+			try:
+				distance_threshold = float(sys.argv[5])
+			except ValueError:
+				print(f"Distance must be a number in kilometers: {sys.argv[5]}")
+				return
+			if distance_threshold < 0:
+				print("Distance must be >= 0.")
+				return
+
+		subway_map = build_boston_map() if city == 'boston' else build_london_map()
+
+		start_station = subway_map.get_station_by_name(start_name)
+		goal_station = subway_map.get_station_by_name(goal_name)
+
+		if start_station is None:
+			print(f"Start station not found: {start_name}")
+			return
+		if goal_station is None:
+			print(f"Goal station not found: {goal_name}")
+			return
+
+		problem = SubwayProblem(subway_map, start_station, goal_station, distance_threshold)
+	else:
+		print("First argument must be 'boston', 'london', or 'eight'.")
+		return
+
+	if algorithm == 'dfs':
+		goal_node = depth_first_search(problem)
+	elif algorithm == 'bfs':
+		goal_node = breadth_first_search(problem)
+	elif algorithm == 'ucs':
+		goal_node = uniform_cost_search(problem)
+	elif algorithm == 'astar':
+		goal_node = astar_search(problem)
+	else:
+		print("Supported algorithms right now: dfs, bfs, ucs, astar")
+		return
+
+	visited_count = getattr(problem, 'visited_count', 0)
+
+	if goal_node is None:
+		print("No path found.")
+		print(f"Search nodes visited: {visited_count}")
+		return
+
+	path_states = []
+	for node in goal_node.path():
+		if hasattr(node.state, 'name'):
+			path_states.append(node.state.name)
+		else:
+			path_states.append(str(node.state))
+	print('Path:', ' -> '.join(path_states))
+	print(f'Total cost: {goal_node.path_cost:.3f}')
+	print(f'Search nodes visited: {visited_count}')
+
+
+if __name__ == '__main__':
+	main()
